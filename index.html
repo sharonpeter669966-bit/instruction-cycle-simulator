@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instruction Cycle Simulator</title>
+<style>
+:root{--bg:#0a1a3f;--panel:#12295e;--line:#27458f;--ink:#eaf1ff;--mute:#9db3e0;--y:#ffd23f;--b:#4ea1ff;--g:#35d07f;--o:#ff9f43;--p:#b388ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:14px;max-width:820px;margin-inline:auto}
+h1{font-size:1.5rem;margin:0}
+h1 span{color:var(--y)}
+.sub{margin:2px 0 14px;color:var(--mute)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+h2{font-size:.95rem;margin:0 0 8px;color:var(--y)}
+.mono,textarea,input,li{font-family:ui-monospace,Menlo,Consolas,monospace}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.stages{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.st{text-align:center;padding:9px 2px;border:2px solid var(--line);border-radius:8px;color:var(--mute);font-weight:700;font-size:.85rem}
+.st.on[data-i="0"]{background:var(--b);border-color:var(--b);color:#04122f}
+.st.on[data-i="1"]{background:var(--g);border-color:var(--g);color:#04122f}
+.st.on[data-i="2"]{background:var(--o);border-color:var(--o);color:#04122f}
+.st.on[data-i="3"]{background:var(--p);border-color:var(--p);color:#04122f}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.box{display:block;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:.8rem;color:var(--mute);font-weight:600}
+.box output{display:block;font-size:1.15rem;color:var(--ink);font-weight:600;min-height:1.7rem}
+.box input{width:100%;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--ink);font-size:1.15rem;padding:2px 0}
+.box.chg,.cell.chg{background:var(--y);border-color:var(--y)}
+.box.chg,.box.chg input,.box.chg output,.cell.chg input,.cell.chg small{color:#2a2000}
+.mem{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+.cell{border:1px solid var(--line);border-radius:6px;text-align:center;padding:2px 0}
+.cell small{display:block;font-size:.65rem;color:var(--mute)}
+.cell input{width:100%;background:transparent;border:0;color:var(--ink);text-align:center;font-size:.85rem;padding:0;-moz-appearance:textfield}
+.cell input::-webkit-inner-spin-button{display:none}
+.flag{padding:6px 14px;border:2px solid var(--line);border-radius:8px;font-weight:700;color:var(--mute)}
+.flag.on{background:var(--y);border-color:var(--y);color:#2a2000}
+.alu{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px}
+button,select{font:inherit;font-weight:700;padding:10px 14px;border-radius:8px;border:0;color:#04122f;cursor:pointer}
+#step{background:var(--g)}#run{background:var(--b)}#pause{background:var(--y)}#reset{background:#ff6b6b}#load{background:var(--p)}
+select{background:var(--ink);font-weight:600}
+button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--y);outline-offset:2px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:600px){.two{grid-template-columns:1fr}}
+textarea{width:100%;height:190px;font-size:.92rem;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);resize:vertical}
+#plist{margin:0;padding:0;list-style:none;font-size:.92rem}
+#plist li{padding:1px 8px;border-radius:5px}
+#plist li.cur{background:var(--y);color:#2a2000}
+#err{color:#ff8a8a;min-height:1.4em;margin:6px 0 0}
+#status{font-weight:700}
+#log{max-height:190px;overflow:auto;margin:0;padding-left:20px;font-size:.82rem}
+.ref{color:var(--mute);font-size:.82rem;margin:8px 0 0}
+</style>
+</head>
+<body>
+<h1>Instruction Cycle <span>Simulator</span></h1>
+<p class="sub">Visualizing the heartbeat of a CPU. Write any program, change any value, then step through it.</p>
+
+<section>
+<h2>Current stage</h2>
+<div class="stages" id="stages">
+<div class="st" data-i="0">FETCH</div><div class="st" data-i="1">DECODE</div><div class="st" data-i="2">EXECUTE</div><div class="st" data-i="3">UPDATE PC</div>
+</div>
+<div class="row" style="margin-top:10px">
+<button id="step">Next Step</button><button id="run">Run</button><button id="pause">Pause</button><button id="reset">Reset</button>
+<label class="mono" style="font-size:.8rem">Delay <input type="range" id="speed" min="100" max="1500" value="500"></label>
+</div>
+<p style="margin:8px 0 0">Status: <span id="status">Ready</span></p>
+</section>
+
+<section>
+<h2>Program (editable)</h2>
+<div class="two">
+<div>
+<textarea id="code" spellcheck="false" aria-label="Assembly program"></textarea>
+<div class="row" style="margin-top:8px">
+<button id="load">Load program</button>
+<select id="preset" aria-label="Example programs">
+<option value="0">Example: poster program</option>
+<option value="1">Example: memory add</option>
+<option value="2">Example: loop sum 5..1</option>
+<option value="3">Example: logic, shifts, overflow</option>
+</select>
+</div>
+<p id="err" role="alert"></p>
+</div>
+<ol id="plist" class="mono" aria-label="Program memory"></ol>
+</div>
+<p class="ref mono">MOV Rd, x · LOAD Rd, addr · STORE Rd, addr · ADD/SUB/AND/OR/XOR Rd, x · NOT Rd · SHL/SHR Rd, x · JMP line · JZ line · HALT. x is R0-R3 or a number, addr is 0-15 or a register, ; starts a comment.</p>
+</section>
+
+<section>
+<h2>Registers (editable, 8-bit: 0-255)</h2>
+<div class="grid" id="regs"></div>
+<div class="grid" style="margin-top:8px">
+<label class="box">PC<output id="pc">0</output></label>
+<label class="box">IR<output id="ir">-</output></label>
+</div>
+<div class="row" style="margin-top:8px">Flags
+<span class="flag" id="fZ">Zero</span><span class="flag" id="fC">Carry</span><span class="flag" id="fV">Overflow</span><span class="flag" id="fN">Sign</span></div>
+</section>
+
+<section>
+<h2>ALU</h2>
+<div class="alu">
+<label class="box">A<output id="aA">-</output></label>
+<label class="box">Operator<output id="aO">-</output></label>
+<label class="box">B<output id="aB">-</output></label>
+<label class="box">Result<output id="aR">-</output></label>
+</div>
+</section>
+
+<section>
+<h2>Data memory (editable, 16 cells)</h2>
+<div class="mem" id="mem"></div>
+</section>
+
+<section>
+<h2>Log</h2>
+<ol id="log" class="mono"></ol>
+</section>
+
+<script>
+const $=id=>document.getElementById(id);
+const ALU={ADD:'+',SUB:'-',AND:'&',OR:'|',XOR:'^',NOT:'~',SHL:'<<',SHR:'>>'};
+const PRESETS=[
+{code:"MOV R1, 10\nMOV R2, 5\nADD R1, R2\nSUB R1, R2\nHALT",regs:[0,0,0,0],mem:[]},
+{code:"LOAD R0, 0   ; R0 = memory[0]\nLOAD R1, 1   ; R1 = memory[1]\nADD R0, R1\nSTORE R0, 2  ; memory[2] = R0\nHALT",regs:[0,0,0,0],mem:[12,30,0]},
+{code:"MOV R0, 0   ; sum\nMOV R1, 5   ; counter\nMOV R2, 1\nADD R0, R1\nSUB R1, R2\nJZ 7        ; stop when counter is 0\nJMP 3\nHALT",regs:[0,0,0,0],mem:[]},
+{code:"MOV R0, 12\nMOV R1, 10\nXOR R0, R1   ; 12 ^ 10\nSHL R0, 2    ; shift left by 2\nNOT R1       ; invert bits\nMOV R2, 100\nADD R2, R2   ; signed overflow\nHALT",regs:[0,0,0,0],mem:[]}
+];
+const Rin=[],Min=[];
+let prog=[],snap=null,S={},timer=null;
+
+for(let i=0;i<4;i++){const d=document.createElement('label');d.className='box';d.innerHTML='R'+i+'<input type="number" min="0" max="255" value="0" aria-label="R'+i+'">';$('regs').append(d);Rin.push(d.querySelector('input'))}
+for(let i=0;i<16;i++){const d=document.createElement('label');d.className='cell';d.innerHTML='<small>'+i+'</small><input type="number" min="0" max="255" value="0" aria-label="Memory '+i+'">';$('mem').append(d);Min.push(d.querySelector('input'))}
+
+const rd=e=>(parseInt(e.value)||0)&255;
+const getR=i=>rd(Rin[i]), getM=i=>rd(Min[i]);
+const put=(e,v)=>{e.value=v&255;e.parentElement.classList.add('chg')};
+const fmt=o=>o.t==='r'?'R'+o.v:String(o.v);
+
+function opnd(t,ln){
+  if(/^R[0-3]$/i.test(t))return{t:'r',v:+t[1]};
+  if(/^(0x[0-9a-f]+|\d+)$/i.test(t))return{t:'i',v:Number(t)};
+  throw new Error('Line '+ln+': cannot read "'+t+'"');
+}
+function parse(text){
+  const out=[];
+  text.split('\n').forEach((raw,k)=>{
+    const line=raw.split(';')[0].trim();if(!line)return;
+    const tk=line.split(/[\s,]+/).filter(Boolean),op=tk[0].toUpperCase(),ln=k+1;
+    const bad=m=>{throw new Error('Line '+ln+': '+m)};
+    const need=n=>{if(tk.length!==n+1)bad(op+' needs '+n+' operand'+(n===1?'':'s'))};
+    let a=null,b=null;
+    if(op==='HALT')need(0);
+    else if(op==='JMP'||op==='JZ'){need(1);a=opnd(tk[1],ln);if(a.t!=='i')bad('jump target must be a line number')}
+    else if(op==='NOT'){need(1);a=opnd(tk[1],ln);if(a.t!=='r')bad('operand must be a register R0-R3')}
+    else if(op==='MOV'||op==='LOAD'||op==='STORE'||op in ALU){need(2);a=opnd(tk[1],ln);b=opnd(tk[2],ln);if(a.t!=='r')bad('first operand must be a register R0-R3')}
+    else bad('unknown instruction "'+tk[0]+'"');
+    out.push({op,a,b,text:op+(a?' '+fmt(a):'')+(b?', '+fmt(b):'')});
+  });
+  if(!out.length)throw new Error('Write at least one instruction');
+  if(out.length>64)throw new Error('Program is limited to 64 instructions');
+  out.forEach((p,i)=>{if((p.op==='JMP'||p.op==='JZ')&&p.a.v>=out.length)throw new Error('Instruction '+i+': jump target '+p.a.v+' does not exist')});
+  return out;
+}
+
+function log(t){const li=document.createElement('li');li.textContent=t;$('log').prepend(li);while($('log').children.length>80)$('log').lastChild.remove()}
+function pad(n){return String(n).padStart(2,'0')}
+
+function load(){
+  $('err').textContent='';
+  try{prog=parse($('code').value)}catch(e){$('err').textContent=e.message;return}
+  snap={r:Rin.map(rd),m:Min.map(rd)};
+  reset();log('Program loaded: '+prog.length+' instructions.');
+}
+function reset(){
+  stop();
+  document.querySelectorAll('.chg').forEach(e=>e.classList.remove('chg'));
+  if(snap){snap.r.forEach((v,i)=>Rin[i].value=v);snap.m.forEach((v,i)=>Min[i].value=v)}
+  S={PC:0,IR:'-',phase:0,stage:-1,Z:false,C:false,V:false,N:false,A:null,B:null,res:null,op:null,halted:false,count:0,status:'Ready',next:0};
+  $('log').innerHTML='';render();
+}
+
+function exec(p){
+  const{op,a,b}=p;S.next=S.PC+1;S.A=S.B=S.res=null;S.op=op;
+  const bv=()=>b.t==='r'?getR(b.v):b.v&255;
+  const addr=()=>{const x=b.t==='r'?getR(b.v):b.v;if(x>15)throw new Error('Memory address '+x+' is outside 0-15');return x};
+  if(op in ALU){
+    const A=getR(a.v),B=op==='NOT'?0:bv();let r;S.V=false;
+    S.C=false;
+    if(op==='ADD'){r=A+B;S.C=r>255;S.V=!!((A^r)&(B^r)&128)}else if(op==='SUB'){r=A-B;S.C=A<B;S.V=!!((A^B)&(A^r)&128)}else if(op==='AND')r=A&B;else if(op==='OR')r=A|B;else if(op==='XOR')r=A^B;else if(op==='NOT')r=~A;else if(op==='SHL')r=A<<(B&7);else r=A>>(B&7);
+    r&=255;S.Z=r===0;S.N=!!(r&128);put(Rin[a.v],r);S.A=A;S.B=B;S.res=r;
+    return'ALU: R'+a.v+' = '+(op==='NOT'?'~'+A:A+' '+ALU[op]+' '+B)+' = '+r+' (Z='+(+S.Z)+' C='+(+S.C)+' V='+(+S.V)+' S='+(+S.N)+')';
+  }
+  if(op==='MOV'){const v=bv();put(Rin[a.v],v);S.B=v;S.res=v;return'R'+a.v+' ← '+v}
+  if(op==='LOAD'){const ad=addr(),v=getM(ad);put(Rin[a.v],v);S.res=v;return'R'+a.v+' ← memory['+ad+'] = '+v}
+  if(op==='STORE'){const ad=addr(),v=getR(a.v);put(Min[ad],v);S.res=v;return'memory['+ad+'] ← R'+a.v+' = '+v}
+  if(op==='JMP'){S.next=a.v;return'jump to line '+a.v}
+  if(op==='JZ'){if(S.Z){S.next=a.v;return'Zero flag set, jump to line '+a.v}return'Zero flag clear, no jump'}
+  S.halted=true;return'HALT, CPU stops';
+}
+
+function step(){
+  if(S.halted){log('CPU is halted. Press Reset to run again.');stop();return}
+  document.querySelectorAll('.chg').forEach(e=>e.classList.remove('chg'));
+  let msg;
+  try{
+    if(S.phase===0){
+      if(S.PC>=prog.length)throw new Error('PC ('+S.PC+') ran past the last instruction. Add HALT.');
+      S.stage=0;S.IR=prog[S.PC].text;msg='Fetch: IR ← program['+pad(S.PC)+'] = '+S.IR;S.status='FETCHING...';
+    }else if(S.phase===1){
+      const p=prog[S.PC];S.stage=1;
+      msg='Decode: opcode '+p.op+(p.a?', operand 1 '+fmt(p.a):'')+(p.b?', operand 2 '+fmt(p.b):'');S.status='DECODING...';
+    }else if(S.phase===2){
+      S.stage=2;msg='Execute: '+exec(prog[S.PC]);S.status=S.halted?'HALTED':'EXECUTING...';
+    }else{
+      S.stage=3;msg='Update PC: '+S.PC+' → '+S.next;S.PC=S.next;S.status='PC UPDATED';
+      if(++S.count>5000)throw new Error('Stopped after 5000 instructions (possible infinite loop)');
+    }
+    S.phase=(S.phase+1)%4;
+  }catch(e){S.halted=true;S.status='ERROR';msg='Error: '+e.message;stop()}
+  log(msg);render();
+}
+
+function render(){
+  $('pc').textContent=S.PC;$('ir').textContent=S.IR;
+  $('fZ').classList.toggle('on',S.Z);$('fC').classList.toggle('on',S.C);$('fV').classList.toggle('on',S.V);$('fN').classList.toggle('on',S.N);
+  document.querySelectorAll('.st').forEach(e=>e.classList.toggle('on',+e.dataset.i===S.stage));
+  $('aA').textContent=S.A===null?'-':S.A;$('aB').textContent=S.B===null?'-':S.B;
+  $('aO').textContent=S.op in ALU?ALU[S.op]+' ('+S.op+')':(S.op||'-');$('aR').textContent=S.res===null?'-':S.res;
+  $('status').textContent=S.status;
+  $('plist').innerHTML=prog.map((p,i)=>'<li class="'+(i===S.PC?'cur':'')+'">'+pad(i)+'&nbsp; '+p.text+(i===S.PC?' ←':'')+'</li>').join('');
+}
+
+function stop(){clearInterval(timer);timer=null}
+function run(){
+  if(timer||S.halted)return;
+  timer=setInterval(()=>{step();if(S.halted)stop()},+$('speed').value);
+}
+
+$('step').onclick=()=>{stop();step()};
+$('run').onclick=run;
+$('pause').onclick=()=>{stop();if(!S.halted)S.status='PAUSED';render()};
+$('reset').onclick=reset;
+$('load').onclick=load;
+$('speed').onchange=()=>{if(timer){stop();run()}};
+$('preset').onchange=()=>{
+  const p=PRESETS[+$('preset').value];$('code').value=p.code;
+  p.regs.forEach((v,i)=>Rin[i].value=v);Min.forEach((e,i)=>e.value=p.mem[i]||0);load();
+};
+$('preset').onchange();
+</script>
+</body>
+</html>
